@@ -1,4 +1,4 @@
-# K-DSM: Kurtosis-based Denoising Score Matching for Anomaly Detection
+# K-DSM: Kurtosis-Guided Denoising Score Matching for Tabular Anomaly Detection
 
 This repository contains the implementation of **K-DSM** and accompanying baselines for anomaly detection on tabular and image datasets, evaluated under semi-supervised and unsupervised settings.
 
