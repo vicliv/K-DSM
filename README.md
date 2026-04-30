@@ -173,9 +173,9 @@ This reads the CSV files from `ablations/` or `results/` and produces summary ta
 | **DSM (EMA Teacher)** | DSM with EMA teacher filtering for unsupervised setting |
 | KNN | k-Nearest Neighbors |
 | LOF | Local Outlier Factor |
-| ICL | Instance-wise Contrastive Learning |
+| ICL | Internal Contrastive Learning |
 | DTE | Diffusion Time Estimation |
 | DDAE | Diffusion Denoising Autoencoder |
-| MSM | Multi-Scale Matching |
-| SLAD | Subspace Learning for Anomaly Detection |
-| MCD | Minimum Covariance Determinant (unsupervised only) |
+| MSM | Multi-Scale Score Matching |
+| SLAD | Semantics-Aware Logical Anomaly Detection |
+| MCD | Minimum Covariance Determinant (unsupervised only, poor results in semi-supervised) |
