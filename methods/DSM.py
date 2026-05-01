@@ -13,6 +13,8 @@ import numpy as np
 from typing import Callable, Union
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import kurtosis, norm
+from scipy.stats import iqr as scipy_iqr
+from scipy.stats import entropy as scipy_entropy
 
 from models import ResNetDiffusion
 
@@ -180,6 +182,218 @@ def compute_sigma_by_kurtosis_ggd(
     sigmas = np.clip(sigmas, min_sigma, max_sigma)
     
     return sigmas, kurts
+
+
+def compute_sigma_by_entropy_hist_bin(
+    X, base_sigma=0.5, min_sigma=0.1, max_sigma=1.3, percentage=0.04, bins=40, hist_bins=100, seed=42
+):
+    """
+    Compute per-dimension sigma values from histogram entropy after histogram-peak
+    rearrangement (non-binary features) and outlier trimming. Binary features are
+    detected and assigned a fixed raw value, mirroring the kurtosis binary handling.
+
+    Args:
+        X (np.ndarray): shape (n_samples, n_features)
+        base_sigma (float): sigma anchor for the gaussian-entropy reference
+        min_sigma (float): lower bound for sigma
+        max_sigma (float): upper bound for sigma
+        percentage (float): fraction of samples to trim (equally from both tails)
+        bins (int): number of histogram bins for entropy estimation
+        hist_bins (int): number of bins for histogram peak reordering
+
+    Returns:
+        sigmas: array of sigma values per dimension (bounded)
+        entropies: array of histogram entropies per dimension
+    """
+    n_original = X.shape[0]
+
+    X_sorted = np.sort(X, axis=0)
+    start = int(n_original * (percentage / 2))
+    end = n_original - start
+    X_clean = X_sorted[start:end]
+
+    entropies = []
+
+    # Gaussian reference entropy computed over the same range as feature entropies.
+    rng = np.random.RandomState(seed)
+    gaussian_sample = rng.randn(10000)
+    gaussian_filtered = gaussian_sample[(gaussian_sample >= -3) & (gaussian_sample <= 3)]
+
+    hist_gauss, bin_edges_gauss = np.histogram(
+        gaussian_filtered, bins=bins, density=True, range=(-3, 3)
+    )
+    bin_width_gauss = bin_edges_gauss[1] - bin_edges_gauss[0]
+    prob_dist_gauss = hist_gauss * bin_width_gauss
+    prob_dist_gauss = prob_dist_gauss[prob_dist_gauss > 0]
+    gaussian_entropy = scipy_entropy(prob_dist_gauss)
+
+    for j in range(X_clean.shape[1]):
+        dim_data = X_clean[:, j]
+
+        uniques = set(np.unique(dim_data[~np.isnan(dim_data)]))
+        if uniques.issubset({0, 1}) or uniques.issubset({0.0, 1.0}) or \
+                uniques.issubset({-1, 0, 1}) or uniques.issubset({-1.0, 0.0, 1.0}):
+            # Binary features: treat as Gaussian → maps to base_sigma via the piecewise rule.
+            entropies.append(gaussian_entropy)
+            continue
+
+        dim_transformed = reorder_by_hist_peak(dim_data, bins=hist_bins)
+        dim_standardized = StandardScaler().fit_transform(dim_transformed.reshape(-1, 1)).ravel()
+
+        dim_filtered = dim_standardized[(dim_standardized >= -3) & (dim_standardized <= 3)]
+
+        hist, bin_edges = np.histogram(dim_filtered, bins=bins, density=True, range=(-3, 3))
+        bin_width = bin_edges[1] - bin_edges[0]
+        prob_dist = hist * bin_width
+        prob_dist = prob_dist[prob_dist > 0]
+
+        if len(prob_dist) < 6:
+            entropies.append(gaussian_entropy - 2.5)
+            continue
+
+        entropies.append(scipy_entropy(prob_dist))
+
+    entropies = np.nan_to_num(
+        np.array(entropies),
+        nan=gaussian_entropy,
+        posinf=gaussian_entropy + 1.0,
+        neginf=gaussian_entropy - 1.5,
+    )
+
+    entropy_low = gaussian_entropy - 2.5
+    entropy_high = gaussian_entropy + 1.0
+
+    sigmas = np.zeros_like(entropies)
+    for i, ent in enumerate(entropies):
+        if ent <= entropy_low:
+            sigmas[i] = max_sigma
+        elif ent < gaussian_entropy:
+            t = (ent - entropy_low) / (gaussian_entropy - entropy_low)
+            sigmas[i] = max_sigma + t * (base_sigma - max_sigma)
+        elif ent == gaussian_entropy:
+            sigmas[i] = base_sigma
+        elif ent < entropy_high:
+            t = (ent - gaussian_entropy) / (entropy_high - gaussian_entropy)
+            sigmas[i] = base_sigma + t * (min_sigma - base_sigma)
+        else:
+            sigmas[i] = min_sigma
+
+    sigmas = np.clip(sigmas, min_sigma, max_sigma)
+
+    return sigmas, entropies
+
+
+def compute_sigma_by_iqr_hist_bin(
+    X, base_sigma=0.5, min_sigma=0.1, max_sigma=2.0, percentage=0.04, hist_bins=100
+):
+    """
+    Compute per-dimension sigma values from the inter-quartile range after
+    histogram-peak rearrangement (non-binary features) and outlier trimming.
+    Binary features are detected and assigned a fixed raw value, mirroring the
+    kurtosis binary handling.
+
+    Args:
+        X (np.ndarray): shape (n_samples, n_features)
+        base_sigma (float): sigma anchor for the gaussian-IQR reference
+        min_sigma (float): lower bound for sigma
+        max_sigma (float): upper bound for sigma
+        percentage (float): fraction of samples to trim (equally from both tails)
+        hist_bins (int): number of bins for histogram peak reordering
+
+    Returns:
+        sigmas: array of sigma values per dimension (bounded)
+        iqr_values: array of IQR values per dimension
+    """
+    n_original = X.shape[0]
+
+    X_sorted = np.sort(X, axis=0)
+    start = int(n_original * (percentage / 2))
+    end = n_original - start
+    X_clean = X_sorted[start:end]
+
+    gaussian_iqr = 1.3490
+    iqr_values = np.zeros(X_clean.shape[1])
+
+    for j in range(X_clean.shape[1]):
+        dim_data = X_clean[:, j]
+
+        uniques = set(np.unique(dim_data[~np.isnan(dim_data)]))
+        if uniques.issubset({0, 1}) or uniques.issubset({0.0, 1.0}) or \
+                uniques.issubset({-1, 0, 1}) or uniques.issubset({-1.0, 0.0, 1.0}):
+            # Binary features: treat as Gaussian IQR → maps to base_sigma.
+            iqr_values[j] = gaussian_iqr
+            continue
+
+        dim_transformed = reorder_by_hist_peak(dim_data, bins=hist_bins)
+        dim_standardized = StandardScaler().fit_transform(dim_transformed.reshape(-1, 1)).ravel()
+        iqr_values[j] = scipy_iqr(dim_standardized)
+
+    iqr_values = np.nan_to_num(iqr_values, nan=gaussian_iqr)
+    iqr_values = np.clip(iqr_values, 1e-6, None)
+
+    ratio = iqr_values / gaussian_iqr
+    sigmas = base_sigma / ratio
+    sigmas = np.clip(sigmas, min_sigma, max_sigma)
+
+    return sigmas, iqr_values
+
+
+def compute_sigma_by_logvar_hist_bin(
+    X, base_sigma=0.5, min_sigma=0.1, max_sigma=2.0, percentage=0.04, hist_bins=100
+):
+    """
+    Compute per-dimension sigma values from the variance of log N(0,1) density
+    after histogram-peak rearrangement (non-binary features) and outlier
+    trimming. Binary features are detected and assigned a fixed raw value,
+    mirroring the kurtosis binary handling.
+
+    Args:
+        X (np.ndarray): shape (n_samples, n_features)
+        base_sigma (float): sigma anchor for the gaussian-logvar reference
+        min_sigma (float): lower bound for sigma
+        max_sigma (float): upper bound for sigma
+        percentage (float): fraction of samples to trim (equally from both tails)
+        hist_bins (int): number of bins for histogram peak reordering
+
+    Returns:
+        sigmas: array of sigma values per dimension (bounded)
+        logvar_values: array of log-density variances per dimension
+    """
+    n_original = X.shape[0]
+
+    X_sorted = np.sort(X, axis=0)
+    start = int(n_original * (percentage / 2))
+    end = n_original - start
+    X_clean = X_sorted[start:end]
+
+    # Analytically exact for z ~ N(0,1): Var[-½z²] = ¼·(E[z⁴] - (E[z²])²) = ¼·(3-1) = 0.5
+    gaussian_log_var = 0.5
+    logvar_values = np.zeros(X_clean.shape[1])
+
+    for j in range(X_clean.shape[1]):
+        dim_data = X_clean[:, j]
+
+        uniques = set(np.unique(dim_data[~np.isnan(dim_data)]))
+        if uniques.issubset({0, 1}) or uniques.issubset({0.0, 1.0}) or \
+                uniques.issubset({-1, 0, 1}) or uniques.issubset({-1.0, 0.0, 1.0}):
+            # Binary features: treat as Gaussian logvar → maps to base_sigma.
+            logvar_values[j] = gaussian_log_var
+            continue
+
+        dim_transformed = reorder_by_hist_peak(dim_data, bins=hist_bins)
+        z = StandardScaler().fit_transform(dim_transformed.reshape(-1, 1)).ravel()
+        log_p = -0.5 * np.log(2 * np.pi) - 0.5 * z ** 2
+        logvar_values[j] = np.var(log_p, ddof=0)
+
+    logvar_values = np.nan_to_num(logvar_values, nan=gaussian_log_var)
+    logvar_values = np.clip(logvar_values, 1e-8, None)
+
+    ratio = logvar_values / gaussian_log_var
+    sigmas = base_sigma / ratio
+    sigmas = np.clip(sigmas, min_sigma, max_sigma)
+
+    return sigmas, logvar_values
+
 
 class DSM_base:
     def __init__(self, seed=0, sigma=0.5, epochs=300, batch_size=128,
@@ -355,7 +569,115 @@ class KDSM_GGD(DSM_base):
         target = -(x_tilde - x_repeated) / sigma
 
         return 0.5 * ((score_pred - target) ** 2).sum(dim=1).mean()
-    
+
+
+class DSM_Entropy(DSM_base):
+    """DSM with per-dimension sigma derived from histogram entropy."""
+
+    def __init__(self, seed=0, sigma=0.5, epochs=500, batch_size=128,
+                 lr=5e-4, weight_decay=5e-5, device=None,
+                 model_name="DSM_Entropy", drop_last=False, verbose=False):
+        super().__init__(seed=seed, sigma=sigma, epochs=epochs, batch_size=batch_size,
+                         lr=lr, weight_decay=weight_decay, device=device,
+                         drop_last=drop_last, verbose=verbose)
+        self.feat_sigma = sigma  # will be replaced by a tensor in fit()
+
+    def fit(self, X_train, y_train=None, project_name="default", logger=None):
+        sigma_vec_np, _ = compute_sigma_by_entropy_hist_bin(
+            np.asarray(X_train), base_sigma=self.sigma, seed=self.seed
+        )
+        self.sigma = float(np.mean(sigma_vec_np))
+        self.feat_sigma = torch.tensor(sigma_vec_np, dtype=torch.float32, device=self.device)
+        print("Computed per-feature sigmas: ", self.feat_sigma.mean().item())
+        return super().fit(X_train, y_train=y_train, project_name=project_name, logger=logger)
+
+    def loss_fn(self, score_model, x, num_noisy_samples=3):
+        batch_size, dim = x.shape
+        sigma = self.feat_sigma
+
+        x_expanded = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        noise = torch.randn_like(x_expanded) * sigma
+        x_tilde = x_expanded + noise
+
+        score_pred = score_model(x_tilde)
+
+        x_repeated = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        target = -(x_tilde - x_repeated) / sigma
+
+        return 0.5 * ((score_pred - target) ** 2).sum(dim=1).mean()
+
+
+class DSM_IQR(DSM_base):
+    """DSM with per-dimension sigma derived from the inter-quartile range."""
+
+    def __init__(self, seed=0, sigma=0.5, epochs=500, batch_size=128,
+                 lr=5e-4, weight_decay=5e-5, device=None,
+                 model_name="DSM_IQR", drop_last=False, verbose=False):
+        super().__init__(seed=seed, sigma=sigma, epochs=epochs, batch_size=batch_size,
+                         lr=lr, weight_decay=weight_decay, device=device,
+                         drop_last=drop_last, verbose=verbose)
+        self.feat_sigma = sigma  # will be replaced by a tensor in fit()
+
+    def fit(self, X_train, y_train=None, project_name="default", logger=None):
+        sigma_vec_np, _ = compute_sigma_by_iqr_hist_bin(
+            np.asarray(X_train), base_sigma=self.sigma
+        )
+        self.sigma = float(np.mean(sigma_vec_np))
+        self.feat_sigma = torch.tensor(sigma_vec_np, dtype=torch.float32, device=self.device)
+        print("Computed per-feature sigmas: ", self.feat_sigma.mean().item())
+        return super().fit(X_train, y_train=y_train, project_name=project_name, logger=logger)
+
+    def loss_fn(self, score_model, x, num_noisy_samples=3):
+        batch_size, dim = x.shape
+        sigma = self.feat_sigma
+
+        x_expanded = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        noise = torch.randn_like(x_expanded) * sigma
+        x_tilde = x_expanded + noise
+
+        score_pred = score_model(x_tilde)
+
+        x_repeated = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        target = -(x_tilde - x_repeated) / sigma
+
+        return 0.5 * ((score_pred - target) ** 2).sum(dim=1).mean()
+
+
+class DSM_LogVar(DSM_base):
+    """DSM with per-dimension sigma derived from the variance of log N(0,1) density."""
+
+    def __init__(self, seed=0, sigma=0.5, epochs=500, batch_size=128,
+                 lr=5e-4, weight_decay=5e-5, device=None,
+                 model_name="DSM_LogVar", drop_last=False, verbose=False):
+        super().__init__(seed=seed, sigma=sigma, epochs=epochs, batch_size=batch_size,
+                         lr=lr, weight_decay=weight_decay, device=device,
+                         drop_last=drop_last, verbose=verbose)
+        self.feat_sigma = sigma  # will be replaced by a tensor in fit()
+
+    def fit(self, X_train, y_train=None, project_name="default", logger=None):
+        sigma_vec_np, _ = compute_sigma_by_logvar_hist_bin(
+            np.asarray(X_train), base_sigma=self.sigma
+        )
+        self.sigma = float(np.mean(sigma_vec_np))
+        self.feat_sigma = torch.tensor(sigma_vec_np, dtype=torch.float32, device=self.device)
+        print("Computed per-feature sigmas: ", self.feat_sigma.mean().item())
+        return super().fit(X_train, y_train=y_train, project_name=project_name, logger=logger)
+
+    def loss_fn(self, score_model, x, num_noisy_samples=3):
+        batch_size, dim = x.shape
+        sigma = self.feat_sigma
+
+        x_expanded = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        noise = torch.randn_like(x_expanded) * sigma
+        x_tilde = x_expanded + noise
+
+        score_pred = score_model(x_tilde)
+
+        x_repeated = x.unsqueeze(1).repeat(1, num_noisy_samples, 1).reshape(-1, dim)
+        target = -(x_tilde - x_repeated) / sigma
+
+        return 0.5 * ((score_pred - target) ** 2).sum(dim=1).mean()
+
 
 import copy as _copy
 

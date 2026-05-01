@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 
 from baselines.DTE import DTECategorical
-from methods.DSM import KDSM, DSM, KDSM_EMATeacher, DSM_EMATeacher
+from methods.DSM import KDSM, DSM, KDSM_EMATeacher, DSM_EMATeacher, DSM_Entropy, DSM_IQR, DSM_LogVar
 from baselines.MSM.MSM import MSM
 from baselines.DDAE import DDAE
 from baselines.SLAD.slad import SLAD
@@ -62,6 +62,11 @@ def main(args):
     model_dict['MSM'] = MSM
     model_dict['DDAE'] = DDAE
     model_dict['SLAD'] = SLAD
+
+    # Alternative sigma selection methods
+    model_dict['DSM-Entropy'] = DSM_Entropy
+    model_dict['DSM-IQR'] = DSM_IQR
+    model_dict['DSM-LogVar'] = DSM_LogVar
     
     if "unsup" in setting:
         model_dict['KDSM_EMATeacher'] = KDSM_EMATeacher

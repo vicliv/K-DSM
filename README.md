@@ -171,6 +171,9 @@ This reads the CSV files from `ablations/` or `results/` and produces summary ta
 | **DSM** | Standard Denoising Score Matching |
 | **K-DSM (EMA Teacher)** | K-DSM with EMA teacher filtering for unsupervised setting |
 | **DSM (EMA Teacher)** | DSM with EMA teacher filtering for unsupervised setting |
+| DSM-Entropy | DSM with per-feature sigma from histogram entropy |
+| DSM-IQR | DSM with per-feature sigma from inter-quartile range |
+| DSM-LogVar | DSM with per-feature sigma from log-density variance |
 | KNN | k-Nearest Neighbors |
 | LOF | Local Outlier Factor |
 | ICL | Internal Contrastive Learning |
