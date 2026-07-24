@@ -242,7 +242,7 @@ class DDAE:
     """
     def __init__(
             self, 
-            num_timesteps=100, 
+            num_timesteps=50, 
             beta_start=1e-4,
             beta_end=0.02,
             scheduler='linear',

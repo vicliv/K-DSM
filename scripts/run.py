@@ -53,28 +53,28 @@ def main(args):
     model_dict = {}
 
     # Select models
-    model_dict['KNN'] = KNN
-    model_dict['LOF'] = LOF
-    model_dict['DTE'] = DTECategorical
-    model_dict['ICL'] = ICL
+    # model_dict['KNN'] = KNN
+    # model_dict['LOF'] = LOF
+    # model_dict['DTE'] = DTECategorical
+    # model_dict['ICL'] = ICL
     model_dict['K-DSM'] = KDSM
-    model_dict['DSM'] = DSM
-    model_dict['MSM'] = MSM
+    # model_dict['DSM'] = DSM
+    # model_dict['MSM'] = MSM
     model_dict['DDAE'] = DDAE
-    model_dict['SLAD'] = SLAD
+    # model_dict['SLAD'] = SLAD
 
     # Alternative sigma selection methods
-    model_dict['DSM-Entropy'] = DSM_Entropy
-    model_dict['DSM-IQR'] = DSM_IQR
-    model_dict['DSM-LogVar'] = DSM_LogVar
+    # model_dict['DSM-Entropy'] = DSM_Entropy
+    # model_dict['DSM-IQR'] = DSM_IQR
+    # model_dict['DSM-LogVar'] = DSM_LogVar
     
-    if "unsup" in setting:
-        model_dict['KDSM_EMATeacher'] = KDSM_EMATeacher
-        model_dict['DSM_EMATeacher'] = DSM_EMATeacher
-        model_dict['DTE_EMATeacher'] = DTECategorical_EMATeacher
-        model_dict['MSM_EMATeacher'] = MSM_EMATeacher
-        model_dict['DDAE_EMATeacher'] = DDAE_EMATeacher
-        model_dict['MCD'] = MCD
+    # if "unsup" in setting:
+    #     model_dict['KDSM_EMATeacher'] = KDSM_EMATeacher
+    #     model_dict['DSM_EMATeacher'] = DSM_EMATeacher
+    #     model_dict['DTE_EMATeacher'] = DTECategorical_EMATeacher
+    #     model_dict['MSM_EMATeacher'] = MSM_EMATeacher
+    #     model_dict['DDAE_EMATeacher'] = DDAE_EMATeacher
+    #     model_dict['MCD'] = MCD
     
     # Create dataframes to save the results
     aucroc_name = dir + str(seed) + "_AUCROC.csv"

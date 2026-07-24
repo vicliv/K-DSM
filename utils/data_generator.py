@@ -191,23 +191,26 @@ class DataGenerator():
                             df[col] = np.log(x / (1 - x))
                     # Scale all cols (logit-transformed discrete + continuous)
                     all_cols = binary_cols + trinary_cols + scale_cols
-                    scaler = StandardScaler()
                     if len(all_cols) > 0:
-                        df_train[all_cols] = scaler.fit_transform(df_train[all_cols])
-                        df_test[all_cols] = scaler.transform(df_test[all_cols])
+                        df_all = pd.concat([df_train, df_test], ignore_index=True)
+                        df_all[all_cols] = StandardScaler().fit_transform(df_all[all_cols])
+                        df_train = df_all.iloc[:len(df_train)].copy()
+                        df_test = df_all.iloc[len(df_train):].copy()
                 else:
                     # Original skip_binary behaviour: scale only continuous cols
-                    scaler = StandardScaler()
                     if len(scale_cols) > 0:
-                        df_train[scale_cols] = scaler.fit_transform(df_train[scale_cols])
-                        df_test[scale_cols] = scaler.transform(df_test[scale_cols])
+                        df_all = pd.concat([df_train, df_test], ignore_index=True)
+                        df_all[scale_cols] = StandardScaler().fit_transform(df_all[scale_cols])
+                        df_train = df_all.iloc[:len(df_train)].copy()
+                        df_test = df_all.iloc[len(df_train):].copy()
 
                 X_train = df_train.values
                 X_test = df_test.values
             else:
-                scaler = StandardScaler().fit(X_train)
-                X_train = scaler.transform(X_train)
-                X_test = scaler.transform(X_test)
+                X_all = np.concatenate([X_train, X_test], axis=0)
+                X_all = StandardScaler().fit_transform(X_all)
+                X_train = X_all[:len(X_train)]
+                X_test = X_all[len(X_train):]
             
             col_mean = np.nanmean(X_train, axis=0)
             inds = np.where(np.isnan(col_mean))
